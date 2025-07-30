@@ -2,30 +2,60 @@
 
 import re
 
+import re
+
 def parse_chronyc_sources(output):
-    lines = output.strip().split('\n')
+    lines = output.strip().splitlines()
     data = []
+    
     for line in lines:
-        if line.startswith('^') or line.startswith('=') or line.startswith(' '):
-            parts = re.split(r'\s{2,}', line.strip())
-            if len(parts) >= 6:
-                entry = {
-                    'mode': parts[0][0],
-                    'state': parts[0][1],
-                    'name': parts[1],
-                    'stratum': int(parts[2]),
-                    'poll': int(parts[3]),
-                    'reach': int(parts[4], 8),  # octal to decimal
-                    'last_rx': int(parts[5]),
-                    'offset': None,
-                    'jitter': None
-                }
-                match = re.search(r'([+-]\d+\.\d+)\s*\[([+-]\d+\.\d+)\]\s*\+/-\s*([\d\.]+)\s*ms', line)
-                if match:
-                    entry['offset'] = float(match.group(1))
-                    entry['raw_offset'] = float(match.group(2))
-                    entry['jitter'] = float(match.group(3))
-                data.append(entry)
+        # Skip header lines
+        if not line or line.startswith('=') or line.startswith('MS'):
+            continue
+        
+        # Match everything before the offset block (last 3 numbers)
+        parts = re.split(r'\s{2,}', line.strip())
+        if len(parts) < 6:
+            continue  # Skip malformed lines
+
+        try:
+            entry = {
+                'mode': parts[0][0],        # ^ or =
+                'state': parts[0][1],       # *, +, -, ?
+                'name': parts[1],
+                'stratum': int(parts[2]),
+                'poll': int(parts[3]),
+                'reach': int(parts[4], 8),  # octal -> decimal
+                'last_rx': int(parts[5]),
+                'offset': None,
+                'raw_offset': None,
+                'jitter': None
+            }
+
+            # Match offset patterns (e.g., -14us[+1247us] +/- 1234us or +0.123s[+0.223s] +/- 0.789 ms)
+            offset_match = re.search(r'([+-]?\d+\.?\d*)([a-z]+)?\s*\[\s*([+-]?\d+\.?\d*)([a-z]+)?\]\s*\+/-\s*([+-]?\d+\.?\d*)([a-z]+)?', line)
+
+            if offset_match:
+                offset_val = float(offset_match.group(1))
+                raw_offset_val = float(offset_match.group(3))
+                jitter_val = float(offset_match.group(5))
+
+                # Optionally, convert microseconds to seconds if unit is 'us'
+                if offset_match.group(2) == 'us':
+                    offset_val /= 1_000_000
+                if offset_match.group(4) == 'us':
+                    raw_offset_val /= 1_000_000
+                if offset_match.group(6) == 'us':
+                    jitter_val /= 1_000_000
+
+                entry['offset'] = offset_val
+                entry['raw_offset'] = raw_offset_val
+                entry['jitter'] = jitter_val
+
+            data.append(entry)
+        except Exception as e:
+            print(f"Error parsing line: {line}\n{e}")
+
     return data
 
 
